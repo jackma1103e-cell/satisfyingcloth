@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Satisfying Rainbow Cuts</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #121212; /* Dark background makes rainbows pop */
+            cursor: crosshair; /* Makes it feel like a cutting tool */
+        }
+        canvas { 
+            display: block; 
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-family: sans-serif;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="instructions">Click and drag to cut the rainbow strands.</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize canvas to fill the screen
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Physics Arrays
+        const points = [];
+        let links = [];
+
+        // Mouse interaction tracking
+        const mouse = { x: 0, y: 0, oldX: 0, oldY: 0, isDown: false };
+
+        window.addEventListener('mousedown', (e) => {
+            mouse.x = e.clientX; mouse.y = e.clientY;
+            mouse.oldX = mouse.x; mouse.oldY = mouse.y;
+            mouse.isDown = true;
+        });
+        
+        window.addEventListener('mousemove', (e) => {
+            if (mouse.isDown) {
+                mouse.oldX = mouse.x; mouse.oldY = mouse.y;
+                mouse.x = e.clientX; mouse.y = e.clientY;
+                cutStrands(mouse.oldX, mouse.oldY, mouse.x, mouse.y);
+            }
+        });
+
+        window.addEventListener('mouseup', () => mouse.isDown = false);
+        // Support for touch screens
+        window.addEventListener('touchstart', (e) => { mouse.isDown = true; mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; });
+        window.addEventListener('touchmove', (e) => {
+            if (mouse.isDown) {
+                mouse.oldX = mouse.x; mouse.oldY = mouse.y;
+                mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY;
+                cutStrands(mouse.oldX, mouse.oldY, mouse.x, mouse.y);
+            }
+        });
+        window.addEventListener('touchend', () => mouse.isDown = false);
+
+        // --- GAME SETUP ---
+        function initStrands() {
+            const gapX = 15; // Distance between strands
+            const gapY = 12; // Length of each link
+            const rows = 40; // How long the strands are
+            
+            // Create a curtain of strands
+            for (let x = 50; x < canvas.width - 50; x += gapX) {
+                // Calculate rainbow hue based on horizontal position
+                const hue = (x / canvas.width) * 360; 
+                const color = `hsl(${hue}, 100%, 60%)`;
+                
+                let prevPoint = null;
+                for (let y = 0; y < rows; y++) {
+                    const isPinned = y === 0; // Top row sticks to the ceiling
+                    const p = { 
+                        x: x, y: y * gapY, 
+                        ox: x, oy: y * gapY, 
+                        pinned: isPinned, 
+                        color: color 
+                    };
+                    points.push(p);
+                    
+                    // Connect to the point directly above it
+                    if (prevPoint) {
+                        links.push({ p1: prevPoint, p2: p, length: gapY, color: color });
+                    }
+                    prevPoint = p;
+                }
+            }
+        }
+
+        // --- MATH: Line Intersection for Slicing ---
+        function intersects(a, b, c, d, p, q, r, s) {
+            let det = (c - a) * (s - q) - (r - p) * (d - b);
+            if (det === 0) return false;
+            let lambda = ((s - q) * (r - a) + (p - r) * (s - b)) / det;
+            let gamma = ((b - d) * (r - a) + (c - a) * (s - b)) / det;
+            return (0 < lambda && lambda < 1) && (0 < gamma && gamma < 1);
+        }
+
+        // Slice logic
+        function cutStrands(x1, y1, x2, y2) {
+            // Filter out links that intersect with the mouse swipe line
+            links = links.filter(link => {
+                const hit = intersects(x1, y1, x2, y2, link.p1.x, link.p1.y, link.p2.x, link.p2.y);
+                return !hit; // Keep if not hit
+            });
+        }
+
+        // --- PHYSICS ENGINE ---
+        function updatePhysics() {
+            // 1. Move points (Verlet integration + Gravity)
+            for (let p of points) {
+                if (p.pinned) continue;
+                // Add a tiny bit of air resistance (0.99)
+                let vx = (p.x - p.ox) * 0.99;
+                let vy = (p.y - p.oy) * 0.99;
+                
+                p.ox = p.x;
+                p.oy = p.y;
+                
+                p.x += vx;
+                p.y += vy + 0.4; // Gravity
+            }
+
+            // 2. Satisfy links (Run 3 times per frame for stiffness)
+            for (let i = 0; i < 3; i++) {
+                for (let l of links) {
+                    let dx = l.p2.x - l.p1.x;
+                    let dy = l.p2.y - l.p1.y;
+                    let distance = Math.hypot(dx, dy);
+                    
+                    // How far off are we from the resting length?
+                    let difference = (l.length - distance) / distance;
+                    let offsetX = dx * difference * 0.5;
+                    let offsetY = dy * difference * 0.5;
+
+                    if (!l.p1.pinned) { l.p1.x -= offsetX; l.p1.y -= offsetY; }
+                    if (!l.p2.pinned) { l.p2.x += offsetX; l.p2.y += offsetY; }
+                }
+            }
+        }
+
+        // --- RENDER LOOP ---
+        function draw() {
+            // Clear screen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw links (the actual cloth)
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            for (let l of links) {
+                ctx.beginPath();
+                ctx.moveTo(l.p1.x, l.p1.y);
+                ctx.lineTo(l.p2.x, l.p2.y);
+                ctx.strokeStyle = l.color;
+                ctx.stroke();
+            }
+
+            // Draw mouse slicing effect
+            if (mouse.isDown) {
+                ctx.beginPath();
+                ctx.moveTo(mouse.oldX, mouse.oldY);
+                ctx.lineTo(mouse.x, mouse.y);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function loop() {
+            updatePhysics();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // Start everything up
+        initStrands();
+        loop();
+
+    </script>
+</body>
+</html>
