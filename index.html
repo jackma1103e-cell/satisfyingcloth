@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Satisfying Rainbow Cuts</title>
+    <title>Cyberpunk Cloth Cuts</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
-            background-color: #121212; 
+            /* Deep, dark synthwave background */
+            background-color: #090214; 
             cursor: crosshair; 
         }
         canvas { 
@@ -19,19 +20,21 @@
             top: 20px;
             left: 20px;
             color: rgba(255, 255, 255, 0.8);
-            font-family: sans-serif;
+            font-family: monospace;
             pointer-events: none;
             user-select: none;
-            background: rgba(0, 0, 0, 0.5);
+            background: rgba(0, 0, 0, 0.7);
             padding: 12px;
-            border-radius: 8px;
+            border-radius: 4px;
+            border: 1px solid #FE53BB;
             line-height: 1.5;
+            text-transform: uppercase;
         }
         .key {
-            background: #fff;
+            background: #08F7FE;
             color: #000;
             padding: 2px 6px;
-            border-radius: 4px;
+            border-radius: 2px;
             font-weight: bold;
         }
     </style>
@@ -39,8 +42,10 @@
 <body>
 
     <div id="instructions">
-        Click and drag to cut the rainbow strands.<br>
-        Press <span class="key">R</span> to replace the curtain.
+        Target: Interconnected Grid<br>
+        Action: Precision Snip (1 Thread/Frame)<br>
+        Input: Mouse Drag<br>
+        System: Press <span class="key">R</span> to Reboot Mesh
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -48,7 +53,6 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // Resize canvas to fill the screen
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -56,11 +60,9 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // Physics Arrays
         const points = [];
         let links = [];
 
-        // Mouse interaction tracking
         const mouse = { x: 0, y: 0, oldX: 0, oldY: 0, isDown: false };
 
         window.addEventListener('mousedown', (e) => {
@@ -79,7 +81,6 @@
 
         window.addEventListener('mouseup', () => mouse.isDown = false);
         
-        // Touch support
         window.addEventListener('touchstart', (e) => { mouse.isDown = true; mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; });
         window.addEventListener('touchmove', (e) => {
             if (mouse.isDown) {
@@ -90,48 +91,63 @@
         });
         window.addEventListener('touchend', () => mouse.isDown = false);
 
-        // Keyboard support for Reset
         window.addEventListener('keydown', (e) => {
             if (e.key.toLowerCase() === 'r') {
                 resetStrands();
             }
         });
 
+        // --- CYBERPUNK PALETTE ---
+        // 3 strict colors: Neon Cyan, Hot Magenta, Neon Yellow
+        const cyberColors = ['#08F7FE', '#FE53BB', '#F5D300'];
+
         // --- GAME SETUP ---
         function initStrands() {
-            const gapX = 8;  // INCREASED DENSITY: Distance between strands is smaller
-            const gapY = 10; // Length of each link
-            const rows = 45; // How long the strands are
+            const cols = 50;  // X strings
+            const rows = 40;  // Y strings
+            const spacing = 12; // Gap between points
             
-            // Create a curtain of strands
-            for (let x = 30; x < canvas.width - 30; x += gapX) {
-                const hue = (x / canvas.width) * 360; 
-                const color = `hsl(${hue}, 100%, 60%)`;
-                
-                let prevPoint = null;
-                for (let y = 0; y < rows; y++) {
-                    const isPinned = y === 0; 
-                    const p = { 
-                        x: x, y: y * gapY, 
-                        ox: x, oy: y * gapY, 
-                        pinned: isPinned, 
-                        color: color 
-                    };
-                    points.push(p);
+            // Center the cloth on the screen
+            const startX = (canvas.width / 2) - ((cols * spacing) / 2);
+            const startY = 40; 
+            
+            // 1. Create the grid of points
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const isPinned = y === 0; // Pin the top row
+                    points.push({ 
+                        x: startX + x * spacing, 
+                        y: startY + y * spacing, 
+                        ox: startX + x * spacing, 
+                        oy: startY + y * spacing, 
+                        pinned: isPinned 
+                    });
+                }
+            }
+
+            // 2. Connect the points with X and Y strings
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    let index = y * cols + x;
                     
-                    if (prevPoint) {
-                        links.push({ p1: prevPoint, p2: p, length: gapY, color: color });
+                    // Assign colors in a repeating sequence
+                    let colorCode = cyberColors[(x + y) % 3];
+
+                    // Connect right (X strings)
+                    if (x < cols - 1) {
+                        links.push({ p1: points[index], p2: points[index + 1], length: spacing, color: colorCode });
                     }
-                    prevPoint = p;
+                    // Connect down (Y strings)
+                    if (y < rows - 1) {
+                        links.push({ p1: points[index], p2: points[index + cols], length: spacing, color: colorCode });
+                    }
                 }
             }
         }
 
         function resetStrands() {
-            // Empty the physics arrays completely
             points.length = 0; 
             links.length = 0;
-            // Rebuild
             initStrands();
         }
 
@@ -144,27 +160,32 @@
             return (0 < lambda && lambda < 1) && (0 < gamma && gamma < 1);
         }
 
-        // Slice logic
+        // --- SLICE LOGIC ---
         function cutStrands(x1, y1, x2, y2) {
+            let hasCutOneStrand = false; // Tracks if we have already cut a thread this frame
+
             links = links.filter(link => {
+                // If we already snipped one strand this swipe frame, keep the rest intact
+                if (hasCutOneStrand) return true;
+
                 const hit = intersects(x1, y1, x2, y2, link.p1.x, link.p1.y, link.p2.x, link.p2.y);
                 
                 if (hit) {
-                    // REALISTIC SCATTER PHYSICS
-                    // By altering the 'old' position (ox, oy), we create instant velocity in Verlet integration.
-                    const kickForce = 12; // How hard the strands snap away
+                    hasCutOneStrand = true; // Lock out any further cuts for this specific mouse movement
+
+                    const kickForce = 15; 
                     
-                    // Random horizontal sway (left or right)
+                    // Random horizontal sway
                     link.p1.ox -= (Math.random() - 0.5) * kickForce;
                     link.p2.ox -= (Math.random() - 0.5) * kickForce;
                     
-                    // Upward bounce to simulate tension release
+                    // Upward bounce simulating tension snap
                     link.p1.oy += Math.random() * (kickForce * 0.8);
                     link.p2.oy += Math.random() * (kickForce * 0.8);
                     
-                    return false; // Remove the cut link
+                    return false; // Break this specific link
                 }
-                return true; // Keep the link if untouched
+                return true; 
             });
         }
 
@@ -174,17 +195,17 @@
             for (let p of points) {
                 if (p.pinned) continue;
                 
-                let vx = (p.x - p.ox) * 0.99; // 0.99 adds air resistance/drag
+                let vx = (p.x - p.ox) * 0.99; 
                 let vy = (p.y - p.oy) * 0.99;
                 
                 p.ox = p.x;
                 p.oy = p.y;
                 
                 p.x += vx;
-                p.y += vy + 0.35; // Gravity pull
+                p.y += vy + 0.35; // Standard gravity
             }
 
-            // 2. Satisfy links
+            // 2. Satisfy links (Runs multiple times to keep the cloth stiff)
             for (let i = 0; i < 3; i++) {
                 for (let l of links) {
                     let dx = l.p2.x - l.p1.x;
@@ -205,8 +226,8 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw the cloth
-            ctx.lineWidth = 3;
+            // Draw the cloth matrix
+            ctx.lineWidth = 2;
             ctx.lineCap = 'round';
             for (let l of links) {
                 ctx.beginPath();
@@ -216,13 +237,14 @@
                 ctx.stroke();
             }
 
-            // Draw the mouse slash
+            // Draw the slicing laser (mouse trail)
             if (mouse.isDown) {
                 ctx.beginPath();
                 ctx.moveTo(mouse.oldX, mouse.oldY);
                 ctx.lineTo(mouse.x, mouse.y);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-                ctx.lineWidth = 2;
+                // Make the cutting tool look like a neon laser
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 3;
                 ctx.stroke();
             }
         }
@@ -233,7 +255,7 @@
             requestAnimationFrame(loop);
         }
 
-        // Start
+        // Initialize and Start
         initStrands();
         loop();
 
