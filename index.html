@@ -8,8 +8,8 @@
         body { 
             margin: 0; 
             overflow: hidden; 
-            background-color: #121212; /* Dark background makes rainbows pop */
-            cursor: crosshair; /* Makes it feel like a cutting tool */
+            background-color: #121212; 
+            cursor: crosshair; 
         }
         canvas { 
             display: block; 
@@ -18,16 +18,30 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.8);
             font-family: sans-serif;
             pointer-events: none;
             user-select: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 12px;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+        .key {
+            background: #fff;
+            color: #000;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
 
-    <div id="instructions">Click and drag to cut the rainbow strands.</div>
+    <div id="instructions">
+        Click and drag to cut the rainbow strands.<br>
+        Press <span class="key">R</span> to replace the curtain.
+    </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -64,7 +78,8 @@
         });
 
         window.addEventListener('mouseup', () => mouse.isDown = false);
-        // Support for touch screens
+        
+        // Touch support
         window.addEventListener('touchstart', (e) => { mouse.isDown = true; mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; });
         window.addEventListener('touchmove', (e) => {
             if (mouse.isDown) {
@@ -75,21 +90,27 @@
         });
         window.addEventListener('touchend', () => mouse.isDown = false);
 
+        // Keyboard support for Reset
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'r') {
+                resetStrands();
+            }
+        });
+
         // --- GAME SETUP ---
         function initStrands() {
-            const gapX = 15; // Distance between strands
-            const gapY = 12; // Length of each link
-            const rows = 40; // How long the strands are
+            const gapX = 8;  // INCREASED DENSITY: Distance between strands is smaller
+            const gapY = 10; // Length of each link
+            const rows = 45; // How long the strands are
             
             // Create a curtain of strands
-            for (let x = 50; x < canvas.width - 50; x += gapX) {
-                // Calculate rainbow hue based on horizontal position
+            for (let x = 30; x < canvas.width - 30; x += gapX) {
                 const hue = (x / canvas.width) * 360; 
                 const color = `hsl(${hue}, 100%, 60%)`;
                 
                 let prevPoint = null;
                 for (let y = 0; y < rows; y++) {
-                    const isPinned = y === 0; // Top row sticks to the ceiling
+                    const isPinned = y === 0; 
                     const p = { 
                         x: x, y: y * gapY, 
                         ox: x, oy: y * gapY, 
@@ -98,7 +119,6 @@
                     };
                     points.push(p);
                     
-                    // Connect to the point directly above it
                     if (prevPoint) {
                         links.push({ p1: prevPoint, p2: p, length: gapY, color: color });
                     }
@@ -107,7 +127,15 @@
             }
         }
 
-        // --- MATH: Line Intersection for Slicing ---
+        function resetStrands() {
+            // Empty the physics arrays completely
+            points.length = 0; 
+            links.length = 0;
+            // Rebuild
+            initStrands();
+        }
+
+        // --- MATH: Line Intersection ---
         function intersects(a, b, c, d, p, q, r, s) {
             let det = (c - a) * (s - q) - (r - p) * (d - b);
             if (det === 0) return false;
@@ -118,37 +146,51 @@
 
         // Slice logic
         function cutStrands(x1, y1, x2, y2) {
-            // Filter out links that intersect with the mouse swipe line
             links = links.filter(link => {
                 const hit = intersects(x1, y1, x2, y2, link.p1.x, link.p1.y, link.p2.x, link.p2.y);
-                return !hit; // Keep if not hit
+                
+                if (hit) {
+                    // REALISTIC SCATTER PHYSICS
+                    // By altering the 'old' position (ox, oy), we create instant velocity in Verlet integration.
+                    const kickForce = 12; // How hard the strands snap away
+                    
+                    // Random horizontal sway (left or right)
+                    link.p1.ox -= (Math.random() - 0.5) * kickForce;
+                    link.p2.ox -= (Math.random() - 0.5) * kickForce;
+                    
+                    // Upward bounce to simulate tension release
+                    link.p1.oy += Math.random() * (kickForce * 0.8);
+                    link.p2.oy += Math.random() * (kickForce * 0.8);
+                    
+                    return false; // Remove the cut link
+                }
+                return true; // Keep the link if untouched
             });
         }
 
         // --- PHYSICS ENGINE ---
         function updatePhysics() {
-            // 1. Move points (Verlet integration + Gravity)
+            // 1. Move points
             for (let p of points) {
                 if (p.pinned) continue;
-                // Add a tiny bit of air resistance (0.99)
-                let vx = (p.x - p.ox) * 0.99;
+                
+                let vx = (p.x - p.ox) * 0.99; // 0.99 adds air resistance/drag
                 let vy = (p.y - p.oy) * 0.99;
                 
                 p.ox = p.x;
                 p.oy = p.y;
                 
                 p.x += vx;
-                p.y += vy + 0.4; // Gravity
+                p.y += vy + 0.35; // Gravity pull
             }
 
-            // 2. Satisfy links (Run 3 times per frame for stiffness)
+            // 2. Satisfy links
             for (let i = 0; i < 3; i++) {
                 for (let l of links) {
                     let dx = l.p2.x - l.p1.x;
                     let dy = l.p2.y - l.p1.y;
                     let distance = Math.hypot(dx, dy);
                     
-                    // How far off are we from the resting length?
                     let difference = (l.length - distance) / distance;
                     let offsetX = dx * difference * 0.5;
                     let offsetY = dy * difference * 0.5;
@@ -161,11 +203,10 @@
 
         // --- RENDER LOOP ---
         function draw() {
-            // Clear screen
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw links (the actual cloth)
-            ctx.lineWidth = 4;
+            // Draw the cloth
+            ctx.lineWidth = 3;
             ctx.lineCap = 'round';
             for (let l of links) {
                 ctx.beginPath();
@@ -175,12 +216,12 @@
                 ctx.stroke();
             }
 
-            // Draw mouse slicing effect
+            // Draw the mouse slash
             if (mouse.isDown) {
                 ctx.beginPath();
                 ctx.moveTo(mouse.oldX, mouse.oldY);
                 ctx.lineTo(mouse.x, mouse.y);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
             }
@@ -192,7 +233,7 @@
             requestAnimationFrame(loop);
         }
 
-        // Start everything up
+        // Start
         initStrands();
         loop();
 
