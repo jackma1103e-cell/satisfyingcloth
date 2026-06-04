@@ -3,14 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cyberpunk Cloth Cuts</title>
+    <title>Cyberpunk Gyro Cuts</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
-            /* Deep, dark synthwave background */
             background-color: #090214; 
             cursor: crosshair; 
+            /* Prevent scrolling/bouncing on iOS */
+            touch-action: none; 
         }
         canvas { 
             display: block; 
@@ -37,16 +38,35 @@
             border-radius: 2px;
             font-weight: bold;
         }
+        /* iOS Permission Button */
+        #sensor-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px;
+            font-size: 18px;
+            font-family: monospace;
+            text-transform: uppercase;
+            background: #090214;
+            color: #08F7FE;
+            border: 2px solid #08F7FE;
+            box-shadow: 0 0 10px #08F7FE;
+            cursor: pointer;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
 
+    <button id="sensor-btn">Enable Gyro Gravity</button>
+
     <div id="instructions">
-        Target: Interconnected Grid<br>
-        Action: Precision Snip (1 Thread/Frame)<br>
-        Input: Mouse Drag<br>
-        System: Press <span class="key">R</span> to Reboot Mesh
+        Target: Cyber-Mesh<br>
+        Gravity: Tilt Device<br>
+        System: Press <span class="key">R</span> or Tap Top Corner to Reboot
     </div>
+    
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -63,8 +83,55 @@
         const points = [];
         let links = [];
 
+        // Dynamic Gravity Variables
+        let gravityX = 0;
+        let gravityY = 0.35; // Default downward gravity before sensors kick in
+
         const mouse = { x: 0, y: 0, oldX: 0, oldY: 0, isDown: false };
 
+        // --- SENSOR PERMISSIONS (Required for iPhone XR) ---
+        const sensorBtn = document.getElementById('sensor-btn');
+        
+        sensorBtn.addEventListener('click', () => {
+            // Check if iOS 13+ device orientation permission is needed
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                            sensorBtn.style.display = 'none'; // Hide button on success
+                        } else {
+                            alert("Gyroscope access is required for gravity controls.");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Non-iOS devices usually don't need explicit permission
+                window.addEventListener('deviceorientation', handleOrientation);
+                sensorBtn.style.display = 'none';
+            }
+        });
+
+        // Calculate gravity based on device tilt
+        function handleOrientation(event) {
+            // Beta is front-to-back tilt (-180 to 180)
+            // Gamma is left-to-right tilt (-90 to 90)
+            let beta = event.beta;  
+            let gamma = event.gamma; 
+
+            if (beta === null || gamma === null) return;
+
+            // Constrain extreme angles to prevent physics glitches
+            const maxTilt = 45;
+            beta = Math.max(-maxTilt, Math.min(maxTilt, beta));
+            gamma = Math.max(-maxTilt, Math.min(maxTilt, gamma));
+
+            // Map the degrees to a gravity force
+            gravityX = (gamma / maxTilt) * 0.4;
+            gravityY = (beta / maxTilt) * 0.4;
+        }
+
+        // --- INPUT HANDLING ---
         window.addEventListener('mousedown', (e) => {
             mouse.x = e.clientX; mouse.y = e.clientY;
             mouse.oldX = mouse.x; mouse.oldY = mouse.y;
@@ -81,7 +148,17 @@
 
         window.addEventListener('mouseup', () => mouse.isDown = false);
         
-        window.addEventListener('touchstart', (e) => { mouse.isDown = true; mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY; });
+        // Touch support optimized for mobile
+        window.addEventListener('touchstart', (e) => { 
+            mouse.isDown = true; 
+            mouse.x = e.touches[0].clientX; 
+            mouse.y = e.touches[0].clientY; 
+
+            // Secret mobile reset: Tap the top-right corner to reset the mesh
+            if (mouse.y < 80 && mouse.x > canvas.width - 80) {
+                resetStrands();
+            }
+        });
         window.addEventListener('touchmove', (e) => {
             if (mouse.isDown) {
                 mouse.oldX = mouse.x; mouse.oldY = mouse.y;
@@ -97,24 +174,21 @@
             }
         });
 
-        // --- CYBERPUNK PALETTE ---
-        // 3 strict colors: Neon Cyan, Hot Magenta, Neon Yellow
         const cyberColors = ['#08F7FE', '#FE53BB', '#F5D300'];
 
         // --- GAME SETUP ---
         function initStrands() {
-            const cols = 50;  // X strings
-            const rows = 40;  // Y strings
-            const spacing = 12; // Gap between points
+            // Adjusted for phone screen widths
+            const cols = Math.floor(canvas.width / 15); 
+            const rows = 40;  
+            const spacing = 12; 
             
-            // Center the cloth on the screen
             const startX = (canvas.width / 2) - ((cols * spacing) / 2);
             const startY = 40; 
             
-            // 1. Create the grid of points
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
-                    const isPinned = y === 0; // Pin the top row
+                    const isPinned = y === 0; 
                     points.push({ 
                         x: startX + x * spacing, 
                         y: startY + y * spacing, 
@@ -125,19 +199,14 @@
                 }
             }
 
-            // 2. Connect the points with X and Y strings
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
                     let index = y * cols + x;
-                    
-                    // Assign colors in a repeating sequence
                     let colorCode = cyberColors[(x + y) % 3];
 
-                    // Connect right (X strings)
                     if (x < cols - 1) {
                         links.push({ p1: points[index], p2: points[index + 1], length: spacing, color: colorCode });
                     }
-                    // Connect down (Y strings)
                     if (y < rows - 1) {
                         links.push({ p1: points[index], p2: points[index + cols], length: spacing, color: colorCode });
                     }
@@ -151,7 +220,6 @@
             initStrands();
         }
 
-        // --- MATH: Line Intersection ---
         function intersects(a, b, c, d, p, q, r, s) {
             let det = (c - a) * (s - q) - (r - p) * (d - b);
             if (det === 0) return false;
@@ -160,30 +228,24 @@
             return (0 < lambda && lambda < 1) && (0 < gamma && gamma < 1);
         }
 
-        // --- SLICE LOGIC ---
         function cutStrands(x1, y1, x2, y2) {
-            let hasCutOneStrand = false; // Tracks if we have already cut a thread this frame
+            let hasCutOneStrand = false; 
 
             links = links.filter(link => {
-                // If we already snipped one strand this swipe frame, keep the rest intact
                 if (hasCutOneStrand) return true;
 
                 const hit = intersects(x1, y1, x2, y2, link.p1.x, link.p1.y, link.p2.x, link.p2.y);
                 
                 if (hit) {
-                    hasCutOneStrand = true; // Lock out any further cuts for this specific mouse movement
+                    hasCutOneStrand = true; 
 
                     const kickForce = 15; 
-                    
-                    // Random horizontal sway
                     link.p1.ox -= (Math.random() - 0.5) * kickForce;
                     link.p2.ox -= (Math.random() - 0.5) * kickForce;
-                    
-                    // Upward bounce simulating tension snap
                     link.p1.oy += Math.random() * (kickForce * 0.8);
                     link.p2.oy += Math.random() * (kickForce * 0.8);
                     
-                    return false; // Break this specific link
+                    return false; 
                 }
                 return true; 
             });
@@ -191,7 +253,6 @@
 
         // --- PHYSICS ENGINE ---
         function updatePhysics() {
-            // 1. Move points
             for (let p of points) {
                 if (p.pinned) continue;
                 
@@ -201,11 +262,11 @@
                 p.ox = p.x;
                 p.oy = p.y;
                 
-                p.x += vx;
-                p.y += vy + 0.35; // Standard gravity
+                // Add the dynamic gravity from the gyroscope
+                p.x += vx + gravityX;
+                p.y += vy + gravityY; 
             }
 
-            // 2. Satisfy links (Runs multiple times to keep the cloth stiff)
             for (let i = 0; i < 3; i++) {
                 for (let l of links) {
                     let dx = l.p2.x - l.p1.x;
@@ -222,11 +283,9 @@
             }
         }
 
-        // --- RENDER LOOP ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw the cloth matrix
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
             for (let l of links) {
@@ -237,12 +296,10 @@
                 ctx.stroke();
             }
 
-            // Draw the slicing laser (mouse trail)
             if (mouse.isDown) {
                 ctx.beginPath();
                 ctx.moveTo(mouse.oldX, mouse.oldY);
                 ctx.lineTo(mouse.x, mouse.y);
-                // Make the cutting tool look like a neon laser
                 ctx.strokeStyle = '#FFFFFF';
                 ctx.lineWidth = 3;
                 ctx.stroke();
@@ -255,7 +312,6 @@
             requestAnimationFrame(loop);
         }
 
-        // Initialize and Start
         initStrands();
         loop();
 
