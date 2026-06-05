@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cyberpunk Gyro Cuts</title>
+    <title>Cyberpunk Gyro Cuts - XR Edition</title>
     <style>
         body { 
             margin: 0; 
             overflow: hidden; 
             background-color: #090214; 
             cursor: crosshair; 
-            /* Prevent scrolling/bouncing on iOS */
             touch-action: none; 
+            -webkit-user-select: none; /* Prevents text selection on long press */
         }
         canvas { 
             display: block; 
@@ -38,7 +38,6 @@
             border-radius: 2px;
             font-weight: bold;
         }
-        /* iOS Permission Button */
         #sensor-btn {
             position: absolute;
             top: 50%;
@@ -59,12 +58,13 @@
 </head>
 <body>
 
-    <button id="sensor-btn">Enable Gyro Gravity</button>
+    <button id="sensor-btn">Enable XR Sensors</button>
 
     <div id="instructions">
         Target: Cyber-Mesh<br>
         Gravity: Tilt Device<br>
-        System: Press <span class="key">R</span> or Tap Top Corner to Reboot
+        Action: Multi-Touch Slice<br>
+        System: Shake Phone to Reboot
     </div>
     
     <canvas id="gameCanvas"></canvas>
@@ -83,61 +83,120 @@
         const points = [];
         let links = [];
 
-        // Dynamic Gravity Variables
         let gravityX = 0;
-        let gravityY = 0.35; // Default downward gravity before sensors kick in
+        let gravityY = 0.35; 
 
+        // Multi-touch tracking dictionary
+        const activeTouches = {};
+        // Mouse fallback for PC testing
         const mouse = { x: 0, y: 0, oldX: 0, oldY: 0, isDown: false };
 
         // --- SENSOR PERMISSIONS (Required for iPhone XR) ---
         const sensorBtn = document.getElementById('sensor-btn');
         
         sensorBtn.addEventListener('click', () => {
-            // Check if iOS 13+ device orientation permission is needed
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation);
-                            sensorBtn.style.display = 'none'; // Hide button on success
+                            window.addEventListener('devicemotion', handleMotion);
+                            sensorBtn.style.display = 'none'; 
                         } else {
-                            alert("Gyroscope access is required for gravity controls.");
+                            alert("Sensors are required for full features.");
                         }
                     })
                     .catch(console.error);
             } else {
-                // Non-iOS devices usually don't need explicit permission
                 window.addEventListener('deviceorientation', handleOrientation);
+                window.addEventListener('devicemotion', handleMotion);
                 sensorBtn.style.display = 'none';
             }
         });
 
-        // Calculate gravity based on device tilt
+        // 1. Gyroscope: Calculate gravity based on device tilt
         function handleOrientation(event) {
-            // Beta is front-to-back tilt (-180 to 180)
-            // Gamma is left-to-right tilt (-90 to 90)
             let beta = event.beta;  
             let gamma = event.gamma; 
-
             if (beta === null || gamma === null) return;
 
-            // Constrain extreme angles to prevent physics glitches
             const maxTilt = 45;
             beta = Math.max(-maxTilt, Math.min(maxTilt, beta));
             gamma = Math.max(-maxTilt, Math.min(maxTilt, gamma));
 
-            // Map the degrees to a gravity force
             gravityX = (gamma / maxTilt) * 0.4;
             gravityY = (beta / maxTilt) * 0.4;
         }
 
+        // 2. Accelerometer: Shake to Reset
+        let lastX = null, lastY = null, lastZ = null;
+        let lastShakeTime = 0;
+
+        function handleMotion(event) {
+            let acc = event.accelerationIncludingGravity;
+            if (!acc || acc.x === null) return;
+
+            if (lastX !== null) {
+                // Calculate total movement force
+                let delta = Math.abs(acc.x + acc.y + acc.z - lastX - lastY - lastZ);
+                
+                if (delta > 25) { // Shake threshold
+                    let now = Date.now();
+                    if (now - lastShakeTime > 1000) { // 1-second cooldown so it doesn't trigger 100 times
+                        resetStrands();
+                        lastShakeTime = now;
+                    }
+                }
+            }
+            lastX = acc.x; lastY = acc.y; lastZ = acc.z;
+        }
+
         // --- INPUT HANDLING ---
+
+        // Multi-touch Events
+        window.addEventListener('touchstart', (e) => { 
+            for(let i = 0; i < e.changedTouches.length; i++) {
+                let t = e.changedTouches[i];
+                activeTouches[t.identifier] = { 
+                    x: t.clientX, y: t.clientY, 
+                    oldX: t.clientX, oldY: t.clientY 
+                };
+            }
+        }, {passive: false});
+
+        window.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Prevents iOS scroll bouncing
+            for(let i = 0; i < e.changedTouches.length; i++) {
+                let t = e.changedTouches[i];
+                let touchObj = activeTouches[t.identifier];
+                if (touchObj) {
+                    touchObj.oldX = touchObj.x; 
+                    touchObj.oldY = touchObj.y;
+                    touchObj.x = t.clientX;     
+                    touchObj.y = t.clientY;
+                    cutStrands(touchObj.oldX, touchObj.oldY, touchObj.x, touchObj.y);
+                }
+            }
+        }, {passive: false});
+
+        window.addEventListener('touchend', (e) => {
+            for(let i = 0; i < e.changedTouches.length; i++) {
+                delete activeTouches[e.changedTouches[i].identifier];
+            }
+        });
+        
+        window.addEventListener('touchcancel', (e) => {
+            for(let i = 0; i < e.changedTouches.length; i++) {
+                delete activeTouches[e.changedTouches[i].identifier];
+            }
+        });
+
+        // Mouse fallback
         window.addEventListener('mousedown', (e) => {
             mouse.x = e.clientX; mouse.y = e.clientY;
             mouse.oldX = mouse.x; mouse.oldY = mouse.y;
             mouse.isDown = true;
         });
-        
         window.addEventListener('mousemove', (e) => {
             if (mouse.isDown) {
                 mouse.oldX = mouse.x; mouse.oldY = mouse.y;
@@ -145,40 +204,13 @@
                 cutStrands(mouse.oldX, mouse.oldY, mouse.x, mouse.y);
             }
         });
-
         window.addEventListener('mouseup', () => mouse.isDown = false);
-        
-        // Touch support optimized for mobile
-        window.addEventListener('touchstart', (e) => { 
-            mouse.isDown = true; 
-            mouse.x = e.touches[0].clientX; 
-            mouse.y = e.touches[0].clientY; 
-
-            // Secret mobile reset: Tap the top-right corner to reset the mesh
-            if (mouse.y < 80 && mouse.x > canvas.width - 80) {
-                resetStrands();
-            }
-        });
-        window.addEventListener('touchmove', (e) => {
-            if (mouse.isDown) {
-                mouse.oldX = mouse.x; mouse.oldY = mouse.y;
-                mouse.x = e.touches[0].clientX; mouse.y = e.touches[0].clientY;
-                cutStrands(mouse.oldX, mouse.oldY, mouse.x, mouse.y);
-            }
-        });
-        window.addEventListener('touchend', () => mouse.isDown = false);
-
-        window.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() === 'r') {
-                resetStrands();
-            }
-        });
+        window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'r') resetStrands(); });
 
         const cyberColors = ['#08F7FE', '#FE53BB', '#F5D300'];
 
         // --- GAME SETUP ---
         function initStrands() {
-            // Adjusted for phone screen widths
             const cols = Math.floor(canvas.width / 15); 
             const rows = 40;  
             const spacing = 12; 
@@ -190,10 +222,8 @@
                 for (let x = 0; x < cols; x++) {
                     const isPinned = y === 0; 
                     points.push({ 
-                        x: startX + x * spacing, 
-                        y: startY + y * spacing, 
-                        ox: startX + x * spacing, 
-                        oy: startY + y * spacing, 
+                        x: startX + x * spacing, y: startY + y * spacing, 
+                        ox: startX + x * spacing, oy: startY + y * spacing, 
                         pinned: isPinned 
                     });
                 }
@@ -204,12 +234,8 @@
                     let index = y * cols + x;
                     let colorCode = cyberColors[(x + y) % 3];
 
-                    if (x < cols - 1) {
-                        links.push({ p1: points[index], p2: points[index + 1], length: spacing, color: colorCode });
-                    }
-                    if (y < rows - 1) {
-                        links.push({ p1: points[index], p2: points[index + cols], length: spacing, color: colorCode });
-                    }
+                    if (x < cols - 1) links.push({ p1: points[index], p2: points[index + 1], length: spacing, color: colorCode });
+                    if (y < rows - 1) links.push({ p1: points[index], p2: points[index + cols], length: spacing, color: colorCode });
                 }
             }
         }
@@ -230,21 +256,17 @@
 
         function cutStrands(x1, y1, x2, y2) {
             let hasCutOneStrand = false; 
-
             links = links.filter(link => {
                 if (hasCutOneStrand) return true;
-
                 const hit = intersects(x1, y1, x2, y2, link.p1.x, link.p1.y, link.p2.x, link.p2.y);
                 
                 if (hit) {
                     hasCutOneStrand = true; 
-
                     const kickForce = 15; 
                     link.p1.ox -= (Math.random() - 0.5) * kickForce;
                     link.p2.ox -= (Math.random() - 0.5) * kickForce;
                     link.p1.oy += Math.random() * (kickForce * 0.8);
                     link.p2.oy += Math.random() * (kickForce * 0.8);
-                    
                     return false; 
                 }
                 return true; 
@@ -255,14 +277,11 @@
         function updatePhysics() {
             for (let p of points) {
                 if (p.pinned) continue;
-                
                 let vx = (p.x - p.ox) * 0.99; 
                 let vy = (p.y - p.oy) * 0.99;
                 
-                p.ox = p.x;
-                p.oy = p.y;
+                p.ox = p.x; p.oy = p.y;
                 
-                // Add the dynamic gravity from the gyroscope
                 p.x += vx + gravityX;
                 p.y += vy + gravityY; 
             }
@@ -286,6 +305,7 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+            // Draw Cloth
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
             for (let l of links) {
@@ -296,12 +316,22 @@
                 ctx.stroke();
             }
 
+            // Draw Multi-Touch Trails
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+            for (let id in activeTouches) {
+                let t = activeTouches[id];
+                ctx.beginPath();
+                ctx.moveTo(t.oldX, t.oldY);
+                ctx.lineTo(t.x, t.y);
+                ctx.stroke();
+            }
+
+            // Draw Mouse Trail (fallback)
             if (mouse.isDown) {
                 ctx.beginPath();
                 ctx.moveTo(mouse.oldX, mouse.oldY);
                 ctx.lineTo(mouse.x, mouse.y);
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = 3;
                 ctx.stroke();
             }
         }
